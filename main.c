@@ -27,92 +27,134 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
- 
+
 /**
- * @file    Tarea 8 - Alarma.c
+ * @file    Tarea8.c
  * @brief   Application entry point.
  */
-#include <stdio.h>
 #include "board.h"
 #include "peripherals.h"
 #include "pin_mux.h"
 #include "clock_config.h"
 #include "MK64F12.h"
 #include "fsl_debug_console.h"
-/* TODO: insert other include files here. */
+#include "fsl_port.h"
+#include "fsl_gpio.h"
+
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
-#include "time.h"
 
-static SemaphoreHandle_t seconds_semaphore;
-static SemaphoreHandle_t minutes_semaphore;
+SemaphoreHandle_t semaforo_segundos;
+SemaphoreHandle_t g_led_semaphore;
+SemaphoreHandle_t semoaforo_minutos;
+SemaphoreHandle_t contador;
 
-void seconds_task()
-{
-    TickType_t xLastWakeType;
-    const TickType_t xPeriod = pdMS_TO_TICKS(1000);
-    xLastWakeType = xTaskGetTickCount();
-    for(;;)
-    {
-        vTaskDelayUntil(&xLastWakeType, xPeriod);//pasa 1 seg
-        uint8_t seconds = increaseSeconds();
-        if(SECONDS_LIMIT == seconds)
-        {
-            xSemaphoreGive(seconds_semaphore);
-            seconds = 0;
-        }
-        else
-            seconds;
-    }
+void seconds_task( void *arg ) {
+	TickType_t LastWakeTime;
+	const TickType_t periodo = pdMS_TO_TICKS(1000);
+	LastWakeTime = xTaskGetTickCount();
+	uint8_t segundos = 0;
+	for (; ;)
+	{
+		vTaskDelayUntil(&LastWakeTime, periodo);
+		segundos++;
+		if (60 == segundos)
+		{
+			segundos = 0;
+			xSemaphoreGive(semaforo_segundos);
+		}
+	}
 }
 
-void minutes_task()
-{
-    xSemaphoreTake(seconds_semaphore, portMAX_DELAY);
-    uint8_t minutes = increaseMinutes();
-    if(MINUTES_LIMIT == minutes)
-    {
-        xSemaphoreGive(minutes_semaphore);
-        minutes = 0;
-    }
-    else
-        minutes;
+void minutes_task( void *arg ) {
+	uint8_t minutos = 0;
+	for (; ;)
+	{
+		xSemaphoreTake(semaforo_segundos, portMAX_DELAY);
+		minutos++;
+		if (60 == minutos)
+		{
+			minutos = 0;
+			xSemaphoreGive(semoaforo_minutos);
+		}
+
+	}
 }
 
-void hours_task()
-{
-    xSemaphoreTake(minutes_semaphore, portMAX_DELAY);
-    uint8_t hours = increaseHours();
-    if(HOURS_LIMIT == hours)
-    {
-        resetTime();
-        //send s m h
-    }
-    else
-        hours;
+void hours_task( void *arg ) {
+
 }
 
-/*
- * @brief   Application entry point.
- */
-int main(void) {
+void print_task( void *arg ) {
 
-  	/* Init board hardware. */
-    BOARD_InitBootPins();
-    BOARD_InitBootClocks();
-    BOARD_InitBootPeripherals();
-  	/* Init FSL debug console. */
-    BOARD_InitDebugConsole();
+}
 
-    seconds_semaphore;
-    minutes_semaphore;
+void led_task( void *arg ) {
+	for (; ;)
+	{
+		xSemaphoreTake(g_led_semaphore, portMAX_DELAY);
+		GPIO_TogglePinsOutput(GPIOB, 1 << 21);
+	}
+}
 
-    //xTaskCreate(led_task, "LED task", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES-1, NULL);
+int main( void ) {
 
-    /* Enter an infinite loop, just incrementing a counter. */
-    while(1) {
+	/* Init board hardware. */
+	BOARD_InitBootPins();
+	BOARD_InitBootClocks();
+	BOARD_InitBootPeripherals();
+	/* Init FSL debug console. */
+	BOARD_InitDebugConsole();
 
-    }
-    return 0 ;
+	CLOCK_EnableClock(kCLOCK_PortB);
+	CLOCK_EnableClock(kCLOCK_PortA);
+	CLOCK_EnableClock(kCLOCK_PortC);
+
+	port_pin_config_t config_led = { kPORT_PullDisable, kPORT_SlowSlewRate,
+			kPORT_PassiveFilterDisable, kPORT_OpenDrainDisable,
+			kPORT_LowDriveStrength, kPORT_MuxAsGpio, kPORT_UnlockRegister, };
+
+	PORT_SetPinConfig(PORTB, 21, &config_led);
+
+	port_pin_config_t config_switch = { kPORT_PullDisable, kPORT_SlowSlewRate,
+			kPORT_PassiveFilterDisable, kPORT_OpenDrainDisable,
+			kPORT_LowDriveStrength, kPORT_MuxAsGpio, kPORT_UnlockRegister };
+	PORT_SetPinInterruptConfig(PORTA, 4, kPORT_InterruptFallingEdge);
+
+	PORT_SetPinConfig(PORTA, 4, &config_switch);
+
+	gpio_pin_config_t led_config_gpio = { kGPIO_DigitalOutput, 1 };
+
+	GPIO_PinInit(GPIOB, 21, &led_config_gpio);
+
+	gpio_pin_config_t switch_config_gpio = { kGPIO_DigitalInput, 1 };
+
+	GPIO_PinInit(GPIOA, 4, &switch_config_gpio);
+
+	NVIC_EnableIRQ(PORTA_IRQn);
+	NVIC_SetPriority(PORTA_IRQn, 5);
+
+	GPIO_WritePinOutput(GPIOB, 21, 0);
+	semaforo_segundos = xSemaphoreCreateBinary();
+	semoaforo_minutos = xSemaphoreCreateBinary();
+	g_led_semaphore = xSemaphoreCreateBinary();
+	contador = xSemaphoreCreateCounting(10, 0);
+	xTaskCreate(seconds_task, "Segundos", configMINIMAL_STACK_SIZE, NULL,
+	configMAX_PRIORITIES - 1, NULL);
+	xTaskCreate(minutes_task, "Minutes", configMINIMAL_STACK_SIZE, NULL,
+	configMAX_PRIORITIES - 1, NULL);
+	xTaskCreate(hours_task, "Hours", configMINIMAL_STACK_SIZE, NULL,
+	configMAX_PRIORITIES - 1, NULL);
+	xTaskCreate(print_task, "Mensaje", configMINIMAL_STACK_SIZE, NULL,
+	configMAX_PRIORITIES - 1, NULL);
+
+	//xTaskCreate(dummy, "dummy task", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES-2, NULL);
+
+	vTaskStartScheduler();
+	while (1)
+	{
+
+	}
+	return 0;
 }
