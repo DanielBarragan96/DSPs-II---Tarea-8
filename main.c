@@ -42,6 +42,7 @@
 #include "fsl_gpio.h"
 #include "fsl_uart.h"
 #include "stdint.h"
+#include "string.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -53,9 +54,11 @@
 #define MINUTES_LIMIT 60
 #define HOURS_LIMIT 24
 
-#define EVENT_60_SECONDS (1<<0)
+#define EVENT__SECONDS (1<<0)
 #define EVENT_60_MINUTES (1<<1)
 #define EVENT_60_HOURS (1<<2)
+
+#define DECADE 10
 
 typedef enum
 {
@@ -84,32 +87,35 @@ void seconds_task (void *arg)
     TickType_t LastWakeTime;
     const TickType_t periodo = pdMS_TO_TICKS(1000);
     LastWakeTime = xTaskGetTickCount ();
-    uint8_t segundos = 0;
+    uint8_t seconds = 0;
     for (;;)
     {
         vTaskDelayUntil (&LastWakeTime, periodo);
-        segundos++;
-        if (SECONDS_LIMIT == segundos)
+        seconds++;
+        if (SECONDS_LIMIT == seconds)
         {
-            segundos = 0;
+            seconds = 0;
             xSemaphoreGive(semaforo_segundos);
         }
+        time_msg_t algo = {SECONDS,seconds};
+        xQueueSend(xQueue, &algo, portMAX_DELAY);
     }
 }
 
 void minutes_task (void *arg)
 {
-    uint8_t minutos = 0;
+    uint8_t minutes = 0;
     for (;;)
     {
         xSemaphoreTake(semaforo_segundos, portMAX_DELAY);
-        minutos++;
-        if (MINUTES_LIMIT == minutos)
+        minutes++;
+        if (MINUTES_LIMIT == minutes)
         {
-            minutos = 0;
+            minutes = 0;
             xSemaphoreGive(semaforo_minutos);
         }
-
+        time_msg_t algo = {MINUTES,minutes};
+        xQueueSend(xQueue, &algo, portMAX_DELAY);
     }
 }
 
@@ -124,13 +130,75 @@ void hours_task (void *arg)
         {
             hours = 0;
         }
-
+        time_msg_t algo = {HOURS,hours};
+        xQueueSend(xQueue, &algo, portMAX_DELAY);
     }
+}
+
+char* parseToASCII(uint8_t val)
+{
+    char* ascii="";
+    uint8_t decades=0;
+    uint8_t units=0;
+    if(DECADE < val)
+    {
+        decades = val/DECADE;
+        units = val -(decades*DECADE);
+    }
+    else
+    {
+        units = val;
+    }
+    units += 48;
+    decades+= 48;
+    PRINTF((char*) units);
+    return ascii;
 }
 
 void print_task (void *arg)
 {
-
+    time_msg_t algoRead;
+    const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
+    uint8_t segundos = 0;
+    uint8_t minutos = 0;
+    uint8_t horas = 0;
+    for(;;)
+    {
+        xQueueGenericReceive(xQueue, &algoRead, portMAX_DELAY, pdFALSE);
+        //xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
+        switch(algoRead.time_type)
+        {
+            case SECONDS:
+            {
+                segundos = algoRead.value;
+                break;
+            }
+            case MINUTES:
+            {
+                minutos = algoRead.value;
+                if(0==minutos)
+                {
+                    xQueueGenericReceive(xQueue, &algoRead, 10, pdFALSE);
+                    if(HOURS == algoRead.time_type)
+                    {
+                        horas = algoRead.value;
+                    }
+                }
+                break;
+            }
+            case HOURS:
+                break;
+            {
+                horas = algoRead.value;
+                break;
+            }
+            default:
+            {
+                break;
+            }
+        }
+        parseToASCII(segundos);
+    }
 }
 
 int main (void)
@@ -148,7 +216,7 @@ int main (void)
     //Queue
     /* Create a queue big enough to hold 10 chars. */
     xQueue = xQueueCreate( QUEUE_LENGTH, QUEUE_ITEM_SIZE );
-    time_msg_t algo = {SECONDS,5};
+    time_msg_t algo = {SECONDS,0};
     xQueueSend(xQueue, &algo, portMAX_DELAY);
     time_msg_t algoRead;
     xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
@@ -167,7 +235,7 @@ int main (void)
     xTaskCreate (hours_task, "Hours", configMINIMAL_STACK_SIZE, NULL,
     configMAX_PRIORITIES - 1, NULL);
     xTaskCreate (print_task, "Mensaje", 110, NULL,
-    configMAX_PRIORITIES - 1, NULL);
+    configMAX_PRIORITIES - 2, NULL);
 
     vTaskStartScheduler ();
 
