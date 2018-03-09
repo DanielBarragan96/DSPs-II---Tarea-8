@@ -27,92 +27,153 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
- 
+
 /**
- * @file    Tarea 8 - Alarma.c
+ * @file    Tarea8.c
  * @brief   Application entry point.
  */
-#include <stdio.h>
 #include "board.h"
 #include "peripherals.h"
 #include "pin_mux.h"
 #include "clock_config.h"
 #include "MK64F12.h"
 #include "fsl_debug_console.h"
-/* TODO: insert other include files here. */
+#include "fsl_port.h"
+#include "fsl_gpio.h"
+#include "fsl_uart.h"
+#include "stdint.h"
+
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
-#include "time.h"
+#include "event_groups.h"
+#include "queue.h"
 
-static SemaphoreHandle_t seconds_semaphore;
-static SemaphoreHandle_t minutes_semaphore;
+#define SECONDS_LIMIT 60
+#define MINUTES_LIMIT 60
+#define HOURS_LIMIT 24
 
-void seconds_task()
+#define EVENT_60_SECONDS (1<<0)
+#define EVENT_60_MINUTES (1<<1)
+#define EVENT_60_HOURS (1<<2)
+
+typedef enum
 {
-    TickType_t xLastWakeType;
-    const TickType_t xPeriod = pdMS_TO_TICKS(1000);
-    xLastWakeType = xTaskGetTickCount();
-    for(;;)
+    SECONDS,
+    MINUTES,
+    HOURS
+}time_types_t;
+
+typedef struct
+{
+    time_types_t time_type;
+    uint8_t value;
+} time_msg_t;
+
+#define QUEUE_LENGTH 3
+#define QUEUE_ITEM_SIZE sizeof( time_msg_t )
+
+SemaphoreHandle_t semaforo_segundos;
+SemaphoreHandle_t semaforo_minutos;
+SemaphoreHandle_t semaforo_horas;
+
+QueueHandle_t xQueue;
+
+void seconds_task (void *arg)
+{
+    TickType_t LastWakeTime;
+    const TickType_t periodo = pdMS_TO_TICKS(1000);
+    LastWakeTime = xTaskGetTickCount ();
+    uint8_t segundos = 0;
+    for (;;)
     {
-        vTaskDelayUntil(&xLastWakeType, xPeriod);//pasa 1 seg
-        uint8_t seconds = increaseSeconds();
-        if(SECONDS_LIMIT == seconds)
+        vTaskDelayUntil (&LastWakeTime, periodo);
+        segundos++;
+        if (SECONDS_LIMIT == segundos)
         {
-            xSemaphoreGive(seconds_semaphore);
-            seconds = 0;
+            segundos = 0;
+            xSemaphoreGive(semaforo_segundos);
         }
-        else
-            seconds;
     }
 }
 
-void minutes_task()
+void minutes_task (void *arg)
 {
-    xSemaphoreTake(seconds_semaphore, portMAX_DELAY);
-    uint8_t minutes = increaseMinutes();
-    if(MINUTES_LIMIT == minutes)
+    uint8_t minutos = 0;
+    for (;;)
     {
-        xSemaphoreGive(minutes_semaphore);
-        minutes = 0;
+        xSemaphoreTake(semaforo_segundos, portMAX_DELAY);
+        minutos++;
+        if (MINUTES_LIMIT == minutos)
+        {
+            minutos = 0;
+            xSemaphoreGive(semaforo_minutos);
+        }
+
     }
-    else
-        minutes;
 }
 
-void hours_task()
+void hours_task (void *arg)
 {
-    xSemaphoreTake(minutes_semaphore, portMAX_DELAY);
-    uint8_t hours = increaseHours();
-    if(HOURS_LIMIT == hours)
+    uint8_t hours = 0;
+    for (;;)
     {
-        resetTime();
-        //send s m h
+        xSemaphoreTake(semaforo_minutos, portMAX_DELAY);
+        hours++;
+        if (HOURS_LIMIT == hours)
+        {
+            hours = 0;
+        }
+
     }
-    else
-        hours;
 }
 
-/*
- * @brief   Application entry point.
- */
-int main(void) {
+void print_task (void *arg)
+{
 
-  	/* Init board hardware. */
-    BOARD_InitBootPins();
-    BOARD_InitBootClocks();
-    BOARD_InitBootPeripherals();
-  	/* Init FSL debug console. */
-    BOARD_InitDebugConsole();
+}
 
-    seconds_semaphore;
-    minutes_semaphore;
+int main (void)
+{
 
-    //xTaskCreate(led_task, "LED task", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES-1, NULL);
+    /* Init board hardware. */
+    BOARD_InitBootPins ();
+    BOARD_InitBootClocks ();
+    BOARD_InitBootPeripherals ();
+    /* Init FSL debug console. */
+    BOARD_InitDebugConsole ();
 
-    /* Enter an infinite loop, just incrementing a counter. */
-    while(1) {
+    //UART
+
+    //Queue
+    /* Create a queue big enough to hold 10 chars. */
+    xQueue = xQueueCreate( QUEUE_LENGTH, QUEUE_ITEM_SIZE );
+    time_msg_t algo = {SECONDS,5};
+    xQueueSend(xQueue, &algo, portMAX_DELAY);
+    time_msg_t algoRead;
+    xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
+
+
+    //Semaphorea
+    semaforo_segundos = xSemaphoreCreateBinary();
+    semaforo_minutos = xSemaphoreCreateBinary();
+    semaforo_horas = xSemaphoreCreateBinary();
+
+    //Tasks
+    xTaskCreate (seconds_task, "Segundos", configMINIMAL_STACK_SIZE, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (minutes_task, "Minutes", configMINIMAL_STACK_SIZE, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (hours_task, "Hours", configMINIMAL_STACK_SIZE, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (print_task, "Mensaje", 110, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+
+    vTaskStartScheduler ();
+
+    while (1)
+    {
 
     }
-    return 0 ;
+    return 0;
 }
