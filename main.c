@@ -174,8 +174,8 @@ char* parseToASCII (uint8_t val)
     units += 48;
     decades += 48;
 
-    PRINTF ((char*) decades); //TODO not working, use UART
-    PRINTF ((char*) units); //TODO not working, use UART
+    //PRINTF ((char*) decades); //TODO not working, use UART
+    //PRINTF ((char*) units); //TODO not working, use UART
 
     return ascii;
 }
@@ -193,34 +193,34 @@ void print_task (void *arg)
         //xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
         switch (algoRead.time_type)
         {
-        case SECONDS:
-        {
-            segundos = algoRead.value;
-            break;
-        }
-        case MINUTES:
-        {
-            minutos = algoRead.value;
-            if (0 == minutos)
+            case SECONDS:
             {
-                xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
-                if (HOURS == algoRead.time_type)
-                {
-                    horas = algoRead.value;
-                }
-            }
-            break;
-        }
-        case HOURS:
-            break;
-            {
-                horas = algoRead.value;
+                segundos = algoRead.value;
                 break;
             }
-        default:
-        {
-            break;
-        }
+            case MINUTES:
+            {
+                minutos = algoRead.value;
+                if (0 == minutos)
+                {
+                    xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
+                    if (HOURS == algoRead.time_type)
+                    {
+                        horas = algoRead.value;
+                    }
+                }
+                break;
+            }
+            case HOURS:
+                break;
+                {
+                    horas = algoRead.value;
+                    break;
+                }
+            default:
+            {
+                break;
+            }
         }
 
         //imprimir por la UART
@@ -237,9 +237,9 @@ void alarm_task()
         for (;;)
         {
             //Espera a que todos los semáforos de la alarma se activen
-            xEventGroupWaitBits(g_time_events, (EVENT_SECONDS&EVENT_MINUTES&EVENT_HOURS), pdTRUE, pdTRUE, portMAX_DELAY);
+            xEventGroupWaitBits(g_time_events, (EVENT_SECONDS & EVENT_MINUTES & EVENT_HOURS), pdTRUE, pdTRUE, portMAX_DELAY);
             //TODO escribir ALARM con la UART
-            xEventGroupClearBits(g_time_events, (EVENT_SECONDS&EVENT_MINUTES&EVENT_HOURS));
+            PRINTF("Alarm");
         }
 }
 
@@ -254,6 +254,7 @@ int main (void)
     BOARD_InitDebugConsole ();
 
     //UART
+    PRINTF("Inicio");
 
     //Queue
     /* Create a queue big enough to hold 10 chars. */
@@ -269,16 +270,18 @@ int main (void)
     semaforo_minutos = xSemaphoreCreateBinary();
     semaforo_horas = xSemaphoreCreateBinary();
 
+    g_time_events = xEventGroupCreate();
+
     //Tasks
-    xTaskCreate (seconds_task, "Segundos", configMINIMAL_STACK_SIZE, NULL,
+    xTaskCreate (seconds_task, "Segundos", 300, NULL,
     configMAX_PRIORITIES - 1, NULL);
-    xTaskCreate (minutes_task, "Minutes", configMINIMAL_STACK_SIZE, NULL,
-    configMAX_PRIORITIES - 1, NULL);
-    xTaskCreate (hours_task, "Hours", configMINIMAL_STACK_SIZE, NULL,
-    configMAX_PRIORITIES - 1, NULL);
-    xTaskCreate (print_task, "Mensaje", 110, NULL,
+    xTaskCreate (minutes_task, "Minutes", 300, NULL,
     configMAX_PRIORITIES - 2, NULL);
-    xTaskCreate (alarm_task, "Alarma", 110, NULL,
+    xTaskCreate (hours_task, "Hours", 300, NULL,
+    configMAX_PRIORITIES - 2, NULL);
+    xTaskCreate (print_task, "Mensaje", 300, NULL,
+    configMAX_PRIORITIES - 2, NULL);
+    xTaskCreate (alarm_task, "Alarma", 300, NULL,
     configMAX_PRIORITIES - 3, NULL);
 
     vTaskStartScheduler ();
