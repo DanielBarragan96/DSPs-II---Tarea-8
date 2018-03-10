@@ -109,8 +109,11 @@ void seconds_task (void *arg)
             seconds = 0;
             xSemaphoreGive(semaforo_segundos);
         }
+        //Checar alarma
+        if (g_alarm.sec==seconds)
+           xEventGroupSetBits(g_time_events,EVENT_SECONDS);
         time_msg_t algo =
-        { SECONDS, seconds };
+            { SECONDS, seconds };
         xQueueSend(xQueue, &algo, portMAX_DELAY);
     }
 }
@@ -127,8 +130,10 @@ void minutes_task (void *arg)
             minutes = 0;
             xSemaphoreGive(semaforo_minutos);
         }
+        if (g_alarm.min==minutes)
+           xEventGroupSetBits(g_time_events,EVENT_MINUTES);
         time_msg_t algo =
-        { MINUTES, minutes };
+            { MINUTES, minutes };
         xQueueSend(xQueue, &algo, portMAX_DELAY);
     }
 }
@@ -144,8 +149,10 @@ void hours_task (void *arg)
         {
             hours = 0;
         }
+        if (g_alarm.hou==hours)
+           xEventGroupSetBits(g_time_events,EVENT_HOURS);
         time_msg_t algo =
-        { HOURS, hours };
+            { HOURS, hours };
         xQueueSend(xQueue, &algo, portMAX_DELAY);
     }
 }
@@ -216,14 +223,6 @@ void print_task (void *arg)
         }
         }
 
-        //Checar alarma
-        if (g_alarm.sec==segundos)
-           xEventGroupSetBits(g_time_events,EVENT_SECONDS);
-        if (g_alarm.min==minutos)
-           xEventGroupSetBits(g_time_events,EVENT_MINUTES);
-        if (g_alarm.hou==horas)
-           xEventGroupSetBits(g_time_events,EVENT_HOURS);
-
         //imprimir por la UART
         parseToASCII (segundos);
         PRINTF(":");
@@ -235,62 +234,9 @@ void print_task (void *arg)
 
 void alarm_task()
 {
-//    time_msg_t algoRead;
-//        uint8_t segundos = 0;
-//        uint8_t minutos = 0;
-//        uint8_t horas = 0;
         for (;;)
         {
-//            //en false para borrar el mensaje de la queue
-//            xQueueGenericReceive (xQueue, &algoRead, portMAX_DELAY, pdTRUE);
-//            //xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
-//            switch (algoRead.time_type)
-//            {
-//                case SECONDS:
-//                {
-//                    segundos = algoRead.value;
-//                    break;
-//                }
-//                case MINUTES:
-//                {
-//                    minutos = algoRead.value;
-//                    if (0 == minutos)
-//                    {
-//                        time_msg_t algoRead2 = algoRead;
-//                        //Borrar último mensaje
-//                        xQueueGenericReceive (xQueue, &algoRead, portMAX_1, pdFALSE);
-//                        //Leer siguiente mensaje
-//                        xQueueGenericReceive (xQueue, &algoRead, 10, pdTRUE);
-//                        if (HOURS == algoRead.time_type)
-//                        {
-//                            horas = algoRead.value;
-//                            //reenviar mensaje anterior para que la función print pueda usar el mensaje
-//                            xQueueSend(xQueue, &algoRead2, portMAX_DELAY);
-//                        }
-//                    }
-//                    break;
-//                }
-//                case HOURS:
-//                    break;
-//                    {
-//                        horas = algoRead.value;
-//                        break;
-//                    }
-//                default:
-//                {
-//                    break;
-//                }
-//            }
-//
-//            //Checar alarma
-//            if (g_alarm.sec==segundos)
-//                xEventGroupSetBits(g_time_events,EVENT_SECONDS);
-//            if (g_alarm.min==minutos)
-//                xEventGroupSetBits(g_time_events,EVENT_MINUTES);
-//            if (g_alarm.hou==horas)
-//                xEventGroupSetBits(g_time_events,EVENT_HOURS);
-//
-//            const TickType_t xPeriod = pdMS_TO_TICKS( 10 );
+            //Espera a que todos los semáforos de la alarma se activen
             xEventGroupWaitBits(g_time_events, (EVENT_SECONDS&EVENT_MINUTES&EVENT_HOURS), pdTRUE, pdTRUE, portMAX_DELAY);
             //TODO escribir ALARM con la UART
             xEventGroupClearBits(g_time_events, (EVENT_SECONDS&EVENT_MINUTES&EVENT_HOURS));
