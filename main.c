@@ -51,9 +51,9 @@
 #include "queue.h"
 
 //counters limit
-#define SECONDS_LIMIT 2
-#define MINUTES_LIMIT 2
-#define HOURS_LIMIT 2
+#define SECONDS_LIMIT 60
+#define MINUTES_LIMIT 60
+#define HOURS_LIMIT 24
 //event group index
 #define EVENT_SECONDS (1<<0)
 #define EVENT_MINUTES (1<<1)
@@ -83,57 +83,6 @@ typedef struct
 #define QUEUE_LENGTH 3
 #define QUEUE_ITEM_SIZE sizeof( time_msg_t )
 
-/* configSUPPORT_STATIC_ALLOCATION is set to 1, so the application must provide an
- implementation of vApplicationGetIdleTaskMemory() to provide the memory that is
- used by the Idle task. */
-void vApplicationGetIdleTaskMemory (StaticTask_t **ppxIdleTaskTCBBuffer,
-        StackType_t **ppxIdleTaskStackBuffer, uint32_t *pulIdleTaskStackSize)
-{
-    /* If the buffers to be provided to the Idle task are declared inside this
-     function then they must be declared static - otherwise they will be allocated on
-     the stack and so not exists after this function exits. */
-    static StaticTask_t xIdleTaskTCB;
-    static StackType_t uxIdleTaskStack[configMINIMAL_STACK_SIZE];
-
-    /* Pass out a pointer to the StaticTask_t structure in which the Idle task's
-     state will be stored. */
-    *ppxIdleTaskTCBBuffer = &xIdleTaskTCB;
-
-    /* Pass out the array that will be used as the Idle task's stack. */
-    *ppxIdleTaskStackBuffer = uxIdleTaskStack;
-
-    /* Pass out the size of the array pointed to by *ppxIdleTaskStackBuffer.
-     Note that, as the array is necessarily of type StackType_t,
-     configMINIMAL_STACK_SIZE is specified in words, not bytes. */
-    *pulIdleTaskStackSize = configMINIMAL_STACK_SIZE;
-}
-/*-----------------------------------------------------------*/
-
-/* configSUPPORT_STATIC_ALLOCATION and configUSE_TIMERS are both set to 1, so the
- application must provide an implementation of vApplicationGetTimerTaskMemory()
- to provide the memory that is used by the Timer service task. */
-void vApplicationGetTimerTaskMemory (StaticTask_t **ppxTimerTaskTCBBuffer,
-        StackType_t **ppxTimerTaskStackBuffer, uint32_t *pulTimerTaskStackSize)
-{
-    /* If the buffers to be provided to the Timer task are declared inside this
-     function then they must be declared static - otherwise they will be allocated on
-     the stack and so not exists after this function exits. */
-    static StaticTask_t xTimerTaskTCB;
-    static StackType_t uxTimerTaskStack[configTIMER_TASK_STACK_DEPTH];
-
-    /* Pass out a pointer to the StaticTask_t structure in which the Timer
-     task's state will be stored. */
-    *ppxTimerTaskTCBBuffer = &xTimerTaskTCB;
-
-    /* Pass out the array that will be used as the Timer task's stack. */
-    *ppxTimerTaskStackBuffer = uxTimerTaskStack;
-
-    /* Pass out the size of the array pointed to by *ppxTimerTaskStackBuffer.
-     Note that, as the array is necessarily of type StackType_t,
-     configTIMER_TASK_STACK_DEPTH is specified in words, not bytes. */
-    *pulTimerTaskStackSize = configTIMER_TASK_STACK_DEPTH;
-}
-
 //Event gorup
 EventGroupHandle_t g_time_events;
 //Semaphores
@@ -143,7 +92,7 @@ SemaphoreHandle_t semaforo_horas;
 //Queue for messages
 QueueHandle_t xQueue;
 //Alarm
-alarm_type_t g_alarm = {0, 1, 0};
+alarm_type_t g_alarm = {10, 0, 1};
 
 void seconds_task (void *arg)
 {
@@ -155,7 +104,6 @@ void seconds_task (void *arg)
     {
         vTaskDelayUntil (&LastWakeTime, periodo);
         seconds++;
-        PRINTF("\rSeconds\n");
         if (SECONDS_LIMIT == seconds)
         {
             seconds = 0;
@@ -164,6 +112,8 @@ void seconds_task (void *arg)
         //Checar alarma
         if (g_alarm.sec==seconds)
            xEventGroupSetBits(g_time_events,EVENT_SECONDS);
+        else
+            xEventGroupClearBits (g_time_events,EVENT_SECONDS);
         time_msg_t algo =
             { SECONDS, seconds };
         xQueueSend(xQueue, &algo, portMAX_DELAY);
@@ -184,6 +134,8 @@ void minutes_task (void *arg)
         }
         if (g_alarm.min==minutes)
            xEventGroupSetBits(g_time_events,EVENT_MINUTES);
+        else
+            xEventGroupClearBits (g_time_events,EVENT_MINUTES);
         time_msg_t algo =
             { MINUTES, minutes };
         xQueueSend(xQueue, &algo, portMAX_DELAY);
@@ -203,6 +155,8 @@ void hours_task (void *arg)
         }
         if (g_alarm.hou==hours)
            xEventGroupSetBits(g_time_events,EVENT_HOURS);
+        else
+            xEventGroupClearBits (g_time_events,EVENT_HOURS);
         time_msg_t algo =
             { HOURS, hours };
         xQueueSend(xQueue, &algo, portMAX_DELAY);
@@ -292,11 +246,11 @@ void alarm_task()
         {
         //Espera a que todos los semáforos de la alarma se activen
         xEventGroupWaitBits (g_time_events,
-                (EVENT_SECONDS & EVENT_MINUTES & EVENT_HOURS), pdFALSE, pdTRUE,
+                (EVENT_SECONDS | EVENT_MINUTES | EVENT_HOURS), pdFALSE, pdTRUE,
                 portMAX_DELAY);
-        //TODO escribir ALARM con la UART
         xEventGroupClearBits (g_time_events,
-                (EVENT_SECONDS & EVENT_MINUTES & EVENT_HOURS));
+                (EVENT_SECONDS | EVENT_MINUTES | EVENT_HOURS));
+        //TODO escribir ALARM con la UART
         PRINTF ("\rAlarm\n");
         }
 }
