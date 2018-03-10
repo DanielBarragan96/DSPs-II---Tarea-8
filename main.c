@@ -83,6 +83,57 @@ typedef struct
 #define QUEUE_LENGTH 3
 #define QUEUE_ITEM_SIZE sizeof( time_msg_t )
 
+/* configSUPPORT_STATIC_ALLOCATION is set to 1, so the application must provide an
+ implementation of vApplicationGetIdleTaskMemory() to provide the memory that is
+ used by the Idle task. */
+void vApplicationGetIdleTaskMemory (StaticTask_t **ppxIdleTaskTCBBuffer,
+        StackType_t **ppxIdleTaskStackBuffer, uint32_t *pulIdleTaskStackSize)
+{
+    /* If the buffers to be provided to the Idle task are declared inside this
+     function then they must be declared static - otherwise they will be allocated on
+     the stack and so not exists after this function exits. */
+    static StaticTask_t xIdleTaskTCB;
+    static StackType_t uxIdleTaskStack[configMINIMAL_STACK_SIZE];
+
+    /* Pass out a pointer to the StaticTask_t structure in which the Idle task's
+     state will be stored. */
+    *ppxIdleTaskTCBBuffer = &xIdleTaskTCB;
+
+    /* Pass out the array that will be used as the Idle task's stack. */
+    *ppxIdleTaskStackBuffer = uxIdleTaskStack;
+
+    /* Pass out the size of the array pointed to by *ppxIdleTaskStackBuffer.
+     Note that, as the array is necessarily of type StackType_t,
+     configMINIMAL_STACK_SIZE is specified in words, not bytes. */
+    *pulIdleTaskStackSize = configMINIMAL_STACK_SIZE;
+}
+/*-----------------------------------------------------------*/
+
+/* configSUPPORT_STATIC_ALLOCATION and configUSE_TIMERS are both set to 1, so the
+ application must provide an implementation of vApplicationGetTimerTaskMemory()
+ to provide the memory that is used by the Timer service task. */
+void vApplicationGetTimerTaskMemory (StaticTask_t **ppxTimerTaskTCBBuffer,
+        StackType_t **ppxTimerTaskStackBuffer, uint32_t *pulTimerTaskStackSize)
+{
+    /* If the buffers to be provided to the Timer task are declared inside this
+     function then they must be declared static - otherwise they will be allocated on
+     the stack and so not exists after this function exits. */
+    static StaticTask_t xTimerTaskTCB;
+    static StackType_t uxTimerTaskStack[configTIMER_TASK_STACK_DEPTH];
+
+    /* Pass out a pointer to the StaticTask_t structure in which the Timer
+     task's state will be stored. */
+    *ppxTimerTaskTCBBuffer = &xTimerTaskTCB;
+
+    /* Pass out the array that will be used as the Timer task's stack. */
+    *ppxTimerTaskStackBuffer = uxTimerTaskStack;
+
+    /* Pass out the size of the array pointed to by *ppxTimerTaskStackBuffer.
+     Note that, as the array is necessarily of type StackType_t,
+     configTIMER_TASK_STACK_DEPTH is specified in words, not bytes. */
+    *pulTimerTaskStackSize = configTIMER_TASK_STACK_DEPTH;
+}
+
 //Event gorup
 EventGroupHandle_t g_time_events;
 //Semaphores
@@ -104,6 +155,7 @@ void seconds_task (void *arg)
     {
         vTaskDelayUntil (&LastWakeTime, periodo);
         seconds++;
+        PRINTF("\rSeconds\n");
         if (SECONDS_LIMIT == seconds)
         {
             seconds = 0;
@@ -188,7 +240,7 @@ void print_task (void *arg)
     uint8_t horas = 0;
     for (;;)
     {
-        //en true para no borrar el mensaje y lo lea alarm_task
+        //false al final para borrar el mensaje leído
         xQueueGenericReceive (xQueue, &algoRead, portMAX_DELAY, pdFALSE);
         //xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
         switch (algoRead.time_type)
@@ -224,11 +276,13 @@ void print_task (void *arg)
         }
 
         //imprimir por la UART
-        parseToASCII (segundos);
-        PRINTF(":");
-        parseToASCII (minutos);
-        PRINTF (":");
-        parseToASCII (horas);
+//        PRINTF("\r");
+//        parseToASCII (segundos);
+//        PRINTF(":");
+//        parseToASCII (minutos);
+//        PRINTF (":");
+//        parseToASCII (horas);
+//        PRINTF("\n");
     }
 }
 
@@ -236,10 +290,14 @@ void alarm_task()
 {
         for (;;)
         {
-            //Espera a que todos los semáforos de la alarma se activen
-            xEventGroupWaitBits(g_time_events, (EVENT_SECONDS & EVENT_MINUTES & EVENT_HOURS), pdTRUE, pdTRUE, portMAX_DELAY);
-            //TODO escribir ALARM con la UART
-            PRINTF("Alarm");
+        //Espera a que todos los semáforos de la alarma se activen
+        xEventGroupWaitBits (g_time_events,
+                (EVENT_SECONDS & EVENT_MINUTES & EVENT_HOURS), pdFALSE, pdTRUE,
+                portMAX_DELAY);
+        //TODO escribir ALARM con la UART
+        xEventGroupClearBits (g_time_events,
+                (EVENT_SECONDS & EVENT_MINUTES & EVENT_HOURS));
+        PRINTF ("\rAlarm\n");
         }
 }
 
@@ -254,7 +312,7 @@ int main (void)
     BOARD_InitDebugConsole ();
 
     //UART
-    PRINTF("Inicio");
+    PRINTF("\rInicio\n\r");
 
     //Queue
     /* Create a queue big enough to hold 10 chars. */
@@ -274,15 +332,15 @@ int main (void)
 
     //Tasks
     xTaskCreate (seconds_task, "Segundos", 300, NULL,
-    configMAX_PRIORITIES - 1, NULL);
+    configMAX_PRIORITIES - 2, NULL);
     xTaskCreate (minutes_task, "Minutes", 300, NULL,
-    configMAX_PRIORITIES - 2, NULL);
+    configMAX_PRIORITIES - 1, NULL);
     xTaskCreate (hours_task, "Hours", 300, NULL,
-    configMAX_PRIORITIES - 2, NULL);
+    configMAX_PRIORITIES - 1, NULL);
     xTaskCreate (print_task, "Mensaje", 300, NULL,
-    configMAX_PRIORITIES - 2, NULL);
+    configMAX_PRIORITIES - 1, NULL);
     xTaskCreate (alarm_task, "Alarma", 300, NULL,
-    configMAX_PRIORITIES - 3, NULL);
+    configMAX_PRIORITIES - 1, NULL);
 
     vTaskStartScheduler ();
 
