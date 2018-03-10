@@ -56,7 +56,7 @@
 #define HOURS_LIMIT 2
 //event group index
 #define EVENT_SECONDS (1<<0)
-#define EVENT__MINUTES (1<<1)
+#define EVENT_MINUTES (1<<1)
 #define EVENT_HOURS (1<<2)
 //value to obteain decades
 #define DECADE 10
@@ -182,7 +182,7 @@ void print_task (void *arg)
     for (;;)
     {
         //en true para no borrar el mensaje y lo lea alarm_task
-        xQueueGenericReceive (xQueue, &algoRead, portMAX_DELAY, pdTRUE);
+        xQueueGenericReceive (xQueue, &algoRead, portMAX_DELAY, pdFALSE);
         //xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
         switch (algoRead.time_type)
         {
@@ -196,7 +196,7 @@ void print_task (void *arg)
             minutos = algoRead.value;
             if (0 == minutos)
             {
-                xQueueGenericReceive (xQueue, &algoRead, 10, pdTRUE);
+                xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
                 if (HOURS == algoRead.time_type)
                 {
                     horas = algoRead.value;
@@ -215,6 +215,16 @@ void print_task (void *arg)
             break;
         }
         }
+
+        //Checar alarma
+        if (g_alarm.sec==segundos)
+           xEventGroupSetBits(g_time_events,EVENT_SECONDS);
+        if (g_alarm.min==minutos)
+           xEventGroupSetBits(g_time_events,EVENT_MINUTES);
+        if (g_alarm.hou==horas)
+           xEventGroupSetBits(g_time_events,EVENT_HOURS);
+
+        //imprimir por la UART
         parseToASCII (segundos);
         PRINTF(":");
         parseToASCII (minutos);
@@ -225,51 +235,65 @@ void print_task (void *arg)
 
 void alarm_task()
 {
-    time_msg_t algoRead;
-        uint8_t segundos = 0;
-        uint8_t minutos = 0;
-        uint8_t horas = 0;
+//    time_msg_t algoRead;
+//        uint8_t segundos = 0;
+//        uint8_t minutos = 0;
+//        uint8_t horas = 0;
         for (;;)
         {
-            //en false para borrar el mensaje de la queue
-            xQueueGenericReceive (xQueue, &algoRead, portMAX_DELAY, pdFALSE);
-            //xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
-            switch (algoRead.time_type)
-            {
-                case SECONDS:
-                {
-                    segundos = algoRead.value;
-                    break;
-                }
-                case MINUTES:
-                {
-                    minutos = algoRead.value;
-                    if (0 == minutos)
-                    {
-                        xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
-                        if (HOURS == algoRead.time_type)
-                        {
-                            horas = algoRead.value;
-                        }
-                    }
-                    break;
-                }
-                case HOURS:
-                    break;
-                    {
-                        horas = algoRead.value;
-                        break;
-                    }
-                default:
-                {
-                    break;
-                }
-            }
-
-
-            if (g_alarm.sec==segundos)
-                xEventGroupSetBits(g_time_events,EVENT_SECONDS);
-
+//            //en false para borrar el mensaje de la queue
+//            xQueueGenericReceive (xQueue, &algoRead, portMAX_DELAY, pdTRUE);
+//            //xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
+//            switch (algoRead.time_type)
+//            {
+//                case SECONDS:
+//                {
+//                    segundos = algoRead.value;
+//                    break;
+//                }
+//                case MINUTES:
+//                {
+//                    minutos = algoRead.value;
+//                    if (0 == minutos)
+//                    {
+//                        time_msg_t algoRead2 = algoRead;
+//                        //Borrar último mensaje
+//                        xQueueGenericReceive (xQueue, &algoRead, portMAX_1, pdFALSE);
+//                        //Leer siguiente mensaje
+//                        xQueueGenericReceive (xQueue, &algoRead, 10, pdTRUE);
+//                        if (HOURS == algoRead.time_type)
+//                        {
+//                            horas = algoRead.value;
+//                            //reenviar mensaje anterior para que la función print pueda usar el mensaje
+//                            xQueueSend(xQueue, &algoRead2, portMAX_DELAY);
+//                        }
+//                    }
+//                    break;
+//                }
+//                case HOURS:
+//                    break;
+//                    {
+//                        horas = algoRead.value;
+//                        break;
+//                    }
+//                default:
+//                {
+//                    break;
+//                }
+//            }
+//
+//            //Checar alarma
+//            if (g_alarm.sec==segundos)
+//                xEventGroupSetBits(g_time_events,EVENT_SECONDS);
+//            if (g_alarm.min==minutos)
+//                xEventGroupSetBits(g_time_events,EVENT_MINUTES);
+//            if (g_alarm.hou==horas)
+//                xEventGroupSetBits(g_time_events,EVENT_HOURS);
+//
+//            const TickType_t xPeriod = pdMS_TO_TICKS( 10 );
+            xEventGroupWaitBits(g_time_events, (EVENT_SECONDS&EVENT_MINUTES&EVENT_HOURS), pdTRUE, pdTRUE, portMAX_DELAY);
+            //TODO escribir ALARM con la UART
+            xEventGroupClearBits(g_time_events, (EVENT_SECONDS&EVENT_MINUTES&EVENT_HOURS));
         }
 }
 
@@ -308,6 +332,8 @@ int main (void)
     configMAX_PRIORITIES - 1, NULL);
     xTaskCreate (print_task, "Mensaje", 110, NULL,
     configMAX_PRIORITIES - 2, NULL);
+    xTaskCreate (alarm_task, "Alarma", 110, NULL,
+    configMAX_PRIORITIES - 3, NULL);
 
     vTaskStartScheduler ();
 
