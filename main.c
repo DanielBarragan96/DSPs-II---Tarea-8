@@ -51,9 +51,9 @@
 #include "queue.h"
 
 //counters limit
-#define SECONDS_LIMIT 60
-#define MINUTES_LIMIT 60
-#define HOURS_LIMIT 24
+#define SECONDS_LIMIT 5
+#define MINUTES_LIMIT 5
+#define HOURS_LIMIT 5
 //event group index
 #define EVENT_SECONDS (1<<0)
 #define EVENT_MINUTES (1<<1)
@@ -202,24 +202,42 @@ void print_task (void *arg)
             case SECONDS:
             {
                 segundos = algoRead.value;
+//                if(0 == segundos)
+//                {
+//                    xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
+//                    if (MINUTES == algoRead.time_type)
+//                    {
+//                        minutos = algoRead.value;
+//                        if (0 == minutos)
+//                       {
+//                           xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
+//                           if (HOURS == algoRead.time_type)
+//                           {
+//                               horas = algoRead.value;
+//                           }
+//                       }
+//                    }
+//                }
                 break;
             }
             case MINUTES:
             {
+                segundos = 0;
                 minutos = algoRead.value;
-                if (0 == minutos)
-                {
-                    xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
-                    if (HOURS == algoRead.time_type)
-                    {
-                        horas = algoRead.value;
-                    }
-                }
+//                if (0 == minutos)
+//                {
+//                    xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
+//                    if (HOURS == algoRead.time_type)
+//                    {
+//                        horas = algoRead.value;
+//                    }
+//                }
                 break;
             }
             case HOURS:
-                break;
                 {
+                    segundos = 0;
+                    minutos = 0;
                     horas = algoRead.value;
                     break;
                 }
