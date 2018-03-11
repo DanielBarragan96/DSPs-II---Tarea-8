@@ -40,121 +40,293 @@
 #include "fsl_debug_console.h"
 #include "fsl_port.h"
 #include "fsl_gpio.h"
+#include "fsl_uart.h"
+#include "fsl_uart_freertos.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
+#include "event_groups.h"
+#include "queue.h"
 
+/* UART instance and clock */
+#define DEMO_UART UART0
+#define DEMO_UART_CLKSRC UART0_CLK_SRC
+#define DEMO_UART_CLK_FREQ CLOCK_GetFreq(UART0_CLK_SRC)
+#define DEMO_UART_RX_TX_IRQn UART0_RX_TX_IRQn
+/* Task priorities. */
+#define uart_task_PRIORITY (configMAX_PRIORITIES - 3)
+
+uint8_t background_buffer[32];
+uint8_t recv_buffer[4];
+uart_rtos_handle_t handle;
+struct _uart_handle t_handle;
+
+uart_rtos_config_t uart_config = {
+    .baudrate = 115200,
+    .parity = kUART_ParityDisabled,
+    .stopbits = kUART_OneStopBit,
+    .buffer = background_buffer,
+    .buffer_size = sizeof(background_buffer),
+};
+
+
+/* Counters limit */
+#define SECONDS_LIMIT 60
+#define MINUTES_LIMIT 60
+#define HOURS_LIMIT 24
+/* Event group index */
+#define EVENT_SECONDS (1<<0)
+#define EVENT_MINUTES (1<<1)
+#define EVENT_HOURS (1<<2)
+/* Value to obteain decades */
+#define DECADE 10
+
+/* Enum to identify message value */
+typedef enum
+{
+    SECONDS, MINUTES, HOURS
+} time_types_t;
+
+/* Struct for messages */
+typedef struct
+{
+    time_types_t time_type;
+    uint8_t value;
+} time_msg_t;
+
+
+/* Alarm struct */
+typedef struct
+{
+    uint8_t sec;
+    uint8_t min;
+    uint8_t hou;
+}alarm_type_t;
+
+#define QUEUE_LENGTH 3
+#define QUEUE_ITEM_SIZE sizeof( time_msg_t )
+
+/* Event gorup */
+EventGroupHandle_t g_time_events;
+
+/* Semaphores */
 SemaphoreHandle_t semaforo_segundos;
-SemaphoreHandle_t g_led_semaphore;
-SemaphoreHandle_t semoaforo_minutos;
-SemaphoreHandle_t contador;
+SemaphoreHandle_t semaforo_minutos;
+SemaphoreHandle_t semaforo_horas;
 
-void seconds_task( void *arg ) {
-	TickType_t LastWakeTime;
-	const TickType_t periodo = pdMS_TO_TICKS(1000);
-	LastWakeTime = xTaskGetTickCount();
-	uint8_t segundos = 0;
-	for (; ;)
-	{
-		vTaskDelayUntil(&LastWakeTime, periodo);
-		segundos++;
-		if (60 == segundos)
-		{
-			segundos = 0;
-			xSemaphoreGive(semaforo_segundos);
-		}
-	}
+/* Queue for messages */
+QueueHandle_t xQueue;
+
+/* Alarm */
+alarm_type_t g_alarm = {10, 0, 1};
+
+void seconds_task (void *arg)
+{
+    TickType_t LastWakeTime;
+    const TickType_t periodo = pdMS_TO_TICKS(1000);
+    LastWakeTime = xTaskGetTickCount ();
+    uint8_t seconds = 0;
+    for (;;)
+    {
+        vTaskDelayUntil (&LastWakeTime, periodo);
+        seconds++;
+        if (SECONDS_LIMIT == seconds)
+        {
+            seconds = 0;
+            xSemaphoreGive(semaforo_segundos);
+        }
+        //Checar alarma
+        if (g_alarm.sec==seconds)
+           xEventGroupSetBits(g_time_events,EVENT_SECONDS);
+        else
+            xEventGroupClearBits (g_time_events,EVENT_SECONDS);
+        time_msg_t algo =
+            { SECONDS, seconds };
+        xQueueSend(xQueue, &algo, portMAX_DELAY);
+    }
 }
 
-void minutes_task( void *arg ) {
-	uint8_t minutos = 0;
-	for (; ;)
-	{
-		xSemaphoreTake(semaforo_segundos, portMAX_DELAY);
-		minutos++;
-		if (60 == minutos)
-		{
-			minutos = 0;
-			xSemaphoreGive(semoaforo_minutos);
-		}
-
-	}
+void minutes_task (void *arg)
+{
+    uint8_t minutes = 0;
+    for (;;)
+    {
+        xSemaphoreTake(semaforo_segundos, portMAX_DELAY);
+        minutes++;
+        if (MINUTES_LIMIT == minutes)
+        {
+            minutes = 0;
+            xSemaphoreGive(semaforo_minutos);
+        }
+        if (g_alarm.min==minutes)
+           xEventGroupSetBits(g_time_events,EVENT_MINUTES);
+        else
+            xEventGroupClearBits (g_time_events,EVENT_MINUTES);
+        time_msg_t algo =
+            { MINUTES, minutes };
+        xQueueSend(xQueue, &algo, portMAX_DELAY);
+    }
 }
 
-void hours_task( void *arg ) {
-
+void hours_task (void *arg)
+{
+    uint8_t hours = 0;
+    for (;;)
+    {
+        xSemaphoreTake(semaforo_minutos, portMAX_DELAY);
+        hours++;
+        if (HOURS_LIMIT == hours)
+        {
+            hours = 0;
+        }
+        if (g_alarm.hou==hours)
+           xEventGroupSetBits(g_time_events,EVENT_HOURS);
+        else
+            xEventGroupClearBits (g_time_events,EVENT_HOURS);
+        time_msg_t algo =
+            { HOURS, hours };
+        xQueueSend(xQueue, &algo, portMAX_DELAY);
+    }
 }
 
-void print_task( void *arg ) {
+char* parseToASCII (uint8_t val)
+{
+    char* ascii = "";
+    uint8_t decades = 0;
+    uint8_t units = 0;
+    if (DECADE < val)
+    {
+        decades = val / DECADE;
+        units = val - (decades * DECADE);
+    }
+    else
+    {
+        units = val;
+    }
+    units += 48;
+    decades += 48;
 
+    //PRINTF ((char*) decades); //TODO not working, use UART
+    //PRINTF ((char*) units); //TODO not working, use UART
+
+    return ascii;
 }
 
-void led_task( void *arg ) {
-	for (; ;)
-	{
-		xSemaphoreTake(g_led_semaphore, portMAX_DELAY);
-		GPIO_TogglePinsOutput(GPIOB, 1 << 21);
-	}
+void print_task (void *arg)
+{
+    time_msg_t algoRead;
+    uint8_t segundos = 0;
+    uint8_t minutos = 0;
+    uint8_t horas = 0;
+    for (;;)
+    {
+        //false al final para borrar el mensaje leído
+        xQueueGenericReceive (xQueue, &algoRead, portMAX_DELAY, pdFALSE);
+        //xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
+        switch (algoRead.time_type)
+        {
+            case SECONDS:
+            {
+                segundos = algoRead.value;
+                break;
+            }
+            case MINUTES:
+            {
+                minutos = algoRead.value;
+                if (0 == minutos)
+                {
+                    xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
+                    if (HOURS == algoRead.time_type)
+                    {
+                        horas = algoRead.value;
+                    }
+                }
+                break;
+            }
+            case HOURS:
+                break;
+                {
+                    horas = algoRead.value;
+                    break;
+                }
+            default:
+            {
+                break;
+            }
+        }
+
+//        UART_RTOS_Send(&handle, (uint8_t *)parseToASCII (horas), strlen(parseToASCII (horas)));
+//        UART_RTOS_Send(&handle, (uint8_t *)parseToASCII (minutos), strlen(parseToASCII (minutos)));
+//        UART_RTOS_Send(&handle, (uint8_t *)parseToASCII (segundos), strlen(parseToASCII (segundos)));
+
+        PRINTF("%d",parseToASCII (segundos));
+        PRINTF(":%d",parseToASCII (minutos));
+        PRINTF(":%d\n",parseToASCII (horas));
+    }
 }
 
-int main( void ) {
-
-	/* Init board hardware. */
-	BOARD_InitBootPins();
-	BOARD_InitBootClocks();
-	BOARD_InitBootPeripherals();
-	/* Init FSL debug console. */
-	BOARD_InitDebugConsole();
-
-	CLOCK_EnableClock(kCLOCK_PortB);
-	CLOCK_EnableClock(kCLOCK_PortA);
-	CLOCK_EnableClock(kCLOCK_PortC);
-
-	port_pin_config_t config_led = { kPORT_PullDisable, kPORT_SlowSlewRate,
-			kPORT_PassiveFilterDisable, kPORT_OpenDrainDisable,
-			kPORT_LowDriveStrength, kPORT_MuxAsGpio, kPORT_UnlockRegister, };
-
-	PORT_SetPinConfig(PORTB, 21, &config_led);
-
-	port_pin_config_t config_switch = { kPORT_PullDisable, kPORT_SlowSlewRate,
-			kPORT_PassiveFilterDisable, kPORT_OpenDrainDisable,
-			kPORT_LowDriveStrength, kPORT_MuxAsGpio, kPORT_UnlockRegister };
-	PORT_SetPinInterruptConfig(PORTA, 4, kPORT_InterruptFallingEdge);
-
-	PORT_SetPinConfig(PORTA, 4, &config_switch);
-
-	gpio_pin_config_t led_config_gpio = { kGPIO_DigitalOutput, 1 };
-
-	GPIO_PinInit(GPIOB, 21, &led_config_gpio);
-
-	gpio_pin_config_t switch_config_gpio = { kGPIO_DigitalInput, 1 };
-
-	GPIO_PinInit(GPIOA, 4, &switch_config_gpio);
-
-	NVIC_EnableIRQ(PORTA_IRQn);
-	NVIC_SetPriority(PORTA_IRQn, 5);
-
-	GPIO_WritePinOutput(GPIOB, 21, 0);
-	semaforo_segundos = xSemaphoreCreateBinary();
-	semoaforo_minutos = xSemaphoreCreateBinary();
-	g_led_semaphore = xSemaphoreCreateBinary();
-	contador = xSemaphoreCreateCounting(10, 0);
-	xTaskCreate(seconds_task, "Segundos", configMINIMAL_STACK_SIZE, NULL,
-	configMAX_PRIORITIES - 1, NULL);
-	xTaskCreate(minutes_task, "Minutes", configMINIMAL_STACK_SIZE, NULL,
-	configMAX_PRIORITIES - 1, NULL);
-	xTaskCreate(hours_task, "Hours", configMINIMAL_STACK_SIZE, NULL,
-	configMAX_PRIORITIES - 1, NULL);
-	xTaskCreate(print_task, "Mensaje", configMINIMAL_STACK_SIZE, NULL,
-	configMAX_PRIORITIES - 1, NULL);
-
-	//xTaskCreate(dummy, "dummy task", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES-2, NULL);
-
-	vTaskStartScheduler();
-	while (1)
-	{
-
-	}
-	return 0;
+void alarm_task()
+{
+        for (;;)
+        {
+        //Espera a que todos los semáforos de la alarma se activen
+        xEventGroupWaitBits (g_time_events,
+                (EVENT_SECONDS | EVENT_MINUTES | EVENT_HOURS), pdFALSE, pdTRUE,
+                portMAX_DELAY);
+        xEventGroupClearBits (g_time_events,
+                (EVENT_SECONDS | EVENT_MINUTES | EVENT_HOURS));
+        //TODO escribir ALARM con la UART
+        PRINTF ("\rAlarm\n");
+        }
 }
+
+int main (void)
+{
+
+    /* Init board hardware. */
+    BOARD_InitBootPins ();
+    BOARD_InitBootClocks ();
+    BOARD_InitBootPeripherals ();
+    /* Init FSL debug console. */
+    BOARD_InitDebugConsole ();
+
+    NVIC_SetPriority(DEMO_UART_RX_TX_IRQn, 5);
+
+    //Queue
+    /* Create a queue big enough to hold 10 chars. */
+    xQueue = xQueueCreate(QUEUE_LENGTH, QUEUE_ITEM_SIZE);
+    time_msg_t algo =
+    { SECONDS, 0 };
+    xQueueSend(xQueue, &algo, portMAX_DELAY);
+    time_msg_t algoRead;
+    xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
+
+    //Semaphorea
+    semaforo_segundos = xSemaphoreCreateBinary();
+    semaforo_minutos = xSemaphoreCreateBinary();
+    semaforo_horas = xSemaphoreCreateBinary();
+
+    g_time_events = xEventGroupCreate();
+
+    //Tasks
+    xTaskCreate (seconds_task, "Segundos", 300, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (minutes_task, "Minutes", 300, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (hours_task, "Hours", 300, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (print_task, "Mensaje", 300, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (alarm_task, "Alarma", 300, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+
+    vTaskStartScheduler ();
+
+    while (1)
+    {
+
+    }
+    return 0;
+}
+
