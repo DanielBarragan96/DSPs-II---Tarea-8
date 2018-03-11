@@ -190,28 +190,6 @@ void hours_task (void *arg)
     }
 }
 
-char* parseToASCII (uint8_t val)
-{
-    char* ascii = "";
-    uint8_t decades = 0;
-    uint8_t units = 0;
-    if (DECADE < val)
-    {
-        decades = val / DECADE;
-        units = val - (decades * DECADE);
-    }
-    else
-    {
-        units = val;
-    }
-    units += 48;
-    decades += 48;
-
-    //PRINTF ((char*) decades); //TODO not working, use UART
-    //PRINTF ((char*) units); //TODO not working, use UART
-
-    return ascii;
-}
 
 void print_task (void *arg)
 {
@@ -260,9 +238,14 @@ void print_task (void *arg)
 //        UART_RTOS_Send(&handle, (uint8_t *)parseToASCII (minutos), strlen(parseToASCII (minutos)));
 //        UART_RTOS_Send(&handle, (uint8_t *)parseToASCII (segundos), strlen(parseToASCII (segundos)));
 
-        PRINTF("%d",parseToASCII (segundos));
-        PRINTF(":%d",parseToASCII (minutos));
-        PRINTF(":%d\n",parseToASCII (horas));
+        PRINTF ("\033[1A");
+        PRINTF("\033[18D");
+        PRINTF("\033[2J");
+        PRINTF(":%d\n",horas);
+        PRINTF(":%d",minutos);
+        PRINTF("%d",segundos);
+
+
     }
 }
 
