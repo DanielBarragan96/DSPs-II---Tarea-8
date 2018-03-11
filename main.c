@@ -41,34 +41,12 @@
 #include "fsl_port.h"
 #include "fsl_gpio.h"
 #include "fsl_uart.h"
-#include "fsl_uart_freertos.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
 #include "event_groups.h"
 #include "queue.h"
-
-/* UART instance and clock */
-#define DEMO_UART UART0
-#define DEMO_UART_CLKSRC UART0_CLK_SRC
-#define DEMO_UART_CLK_FREQ CLOCK_GetFreq(UART0_CLK_SRC)
-#define DEMO_UART_RX_TX_IRQn UART0_RX_TX_IRQn
-/* Task priorities. */
-#define uart_task_PRIORITY (configMAX_PRIORITIES - 3)
-
-uint8_t background_buffer[32];
-uint8_t recv_buffer[4];
-uart_rtos_handle_t handle;
-struct _uart_handle t_handle;
-
-uart_rtos_config_t uart_config = {
-    .baudrate = 115200,
-    .parity = kUART_ParityDisabled,
-    .stopbits = kUART_OneStopBit,
-    .buffer = background_buffer,
-    .buffer_size = sizeof(background_buffer),
-};
 
 
 /* Counters limit */
@@ -79,7 +57,7 @@ uart_rtos_config_t uart_config = {
 #define EVENT_SECONDS (1<<0)
 #define EVENT_MINUTES (1<<1)
 #define EVENT_HOURS (1<<2)
-/* Value to obteain decades */
+/* Value to obtain decades */
 #define DECADE 10
 
 /* Enum to identify message value */
@@ -234,16 +212,12 @@ void print_task (void *arg)
             }
         }
 
-//        UART_RTOS_Send(&handle, (uint8_t *)parseToASCII (horas), strlen(parseToASCII (horas)));
-//        UART_RTOS_Send(&handle, (uint8_t *)parseToASCII (minutos), strlen(parseToASCII (minutos)));
-//        UART_RTOS_Send(&handle, (uint8_t *)parseToASCII (segundos), strlen(parseToASCII (segundos)));
-
         PRINTF ("\033[1A");
         PRINTF("\033[18D");
         PRINTF("\033[2J");
-        PRINTF(":%d\n",horas);
+        PRINTF("   %d",horas);
         PRINTF(":%d",minutos);
-        PRINTF("%d",segundos);
+        PRINTF(":%d\n",segundos);
 
 
     }
@@ -273,8 +247,6 @@ int main (void)
     BOARD_InitBootPeripherals ();
     /* Init FSL debug console. */
     BOARD_InitDebugConsole ();
-
-    NVIC_SetPriority(DEMO_UART_RX_TX_IRQn, 5);
 
     //Queue
     /* Create a queue big enough to hold 10 chars. */
