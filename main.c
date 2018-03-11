@@ -202,36 +202,12 @@ void print_task (void *arg)
             case SECONDS:
             {
                 segundos = algoRead.value;
-//                if(0 == segundos)
-//                {
-//                    xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
-//                    if (MINUTES == algoRead.time_type)
-//                    {
-//                        minutos = algoRead.value;
-//                        if (0 == minutos)
-//                       {
-//                           xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
-//                           if (HOURS == algoRead.time_type)
-//                           {
-//                               horas = algoRead.value;
-//                           }
-//                       }
-//                    }
-//                }
                 break;
             }
             case MINUTES:
             {
                 segundos = 0;
                 minutos = algoRead.value;
-//                if (0 == minutos)
-//                {
-//                    xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
-//                    if (HOURS == algoRead.time_type)
-//                    {
-//                        horas = algoRead.value;
-//                    }
-//                }
                 break;
             }
             case HOURS:
