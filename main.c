@@ -43,6 +43,7 @@
 #include "fsl_uart.h"
 #include "stdint.h"
 #include "string.h"
+#include "stdlib.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -92,7 +93,7 @@ SemaphoreHandle_t semaforo_horas;
 //Queue for messages
 QueueHandle_t xQueue;
 //Alarm
-alarm_type_t g_alarm = {10, 0, 0};
+alarm_type_t g_alarm = {5, 0, 0};
 
 /* UART instance and clock */
 #define DEMO_UART UART0
@@ -218,6 +219,43 @@ void hours_task (void *arg)
     }
 }
 
+char* parseToASCII (uint8_t val)
+{
+    char* ascii = "";
+    char decades = 0;
+    char units = 0;
+    if (DECADE < val)
+    {
+        decades = val / DECADE;
+        units = val - (decades * DECADE);
+    }
+    else
+    {
+        units = val;
+    }
+    units += 48;
+    decades += 48;
+
+    char* decades_c = &decades;
+    uart_transfer_t xfer2;
+    xfer2.data = (uint8_t*) (decades_c);
+    xfer2.dataSize = sizeof(decades_c) - 1;
+    txOnGoing = true;
+    UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer2);
+
+    char* units_c = &units;
+    uart_transfer_t xfer;
+    xfer.data = (uint8_t*) (units_c);
+    xfer.dataSize = sizeof(units_c) - 1;
+    txOnGoing = true;
+    UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
+
+    //PRINTF ((char*) decades); //TODO not working, use UART
+    //PRINTF ((char*) units); //TODO not working, use UART
+
+    return ascii;
+}
+
 void print_task (void *arg)
 {
     uart_transfer_t xfer;
@@ -256,27 +294,11 @@ void print_task (void *arg)
             }
         }
 
-        //imprimir por la UART
-        char* horas_minutos = concat((char*)horas, (char*)minutos);
-        char* tiempo = concat(horas_minutos, (char*)segundos);
+        char buffer[20];
+        itoa(segundos, buffer, 10);//decimal to string
 
-        /* Send g_tipString out. */
-        xfer.data = (uint8_t*)tiempo;
-        xfer.dataSize = sizeof(tiempo) - 1;
-        txOnGoing = true;
-        UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
-//        PRINTF ("\033[1A");
-//        PRINTF("\033[18D");
-//        PRINTF("   ");
-//        if(10 > horas)
-//            PRINTF("0");
-//        PRINTF("%d:",horas);
-//        if(10 > minutos)
-//            PRINTF("0");
-//        PRINTF("%d:",minutos);
-//        if(10 > segundos)
-//            PRINTF("0");
-//        PRINTF("%d\n\r",segundos);
+        parseToASCII(segundos);
+
     }
 }
 
@@ -290,8 +312,12 @@ void alarm_task()
                 portMAX_DELAY);
         xEventGroupClearBits (g_time_events,
                 (EVENT_SECONDS | EVENT_MINUTES | EVENT_HOURS));
-        //TODO escribir ALARM con la UART
-        PRINTF ("\rAlarm");
+       //escribir ALARM con la UART
+       uart_transfer_t xfer;
+       xfer.data = (uint8_t*) ("Alarma");
+       xfer.dataSize = sizeof("Alarma") - 1;
+       txOnGoing = true;
+       UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
         }
 }
 
