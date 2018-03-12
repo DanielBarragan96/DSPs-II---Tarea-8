@@ -194,11 +194,13 @@ void hours_task (void *arg)
 
 void print_task (void *arg)
 {
+	const char* puntos = ":";
+	const char* fin = "   ";
 	uart_transfer_t xfer;
     time_msg_t algoRead;
-    uint8_t segundos = 0;
-    uint8_t minutos = 0;
-    uint8_t horas = 0;
+    uint8_t segundos ;
+    uint8_t minutos ;
+    uint8_t* horas ;
     for (;;)
     {
         //false al final para borrar el mensaje leído
@@ -236,22 +238,17 @@ void print_task (void *arg)
             }
         }
 
-        char* horas_minutos = concat((char*)horas, (char*)minutos);
-        char* tiempo = concat(horas_minutos, (char*)segundos);
+        char* tiempo = concat((char*)horas, (char*)puntos);
 
         /* Send g_tipString out. */
          xfer.data = (uint8_t*)tiempo;
          xfer.dataSize = sizeof(tiempo) - 1;
          txOnGoing = true;
          UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
-
-//        PRINTF ("\033[1A");
-//        PRINTF("\033[18D");
-//        PRINTF("\033[2J");
-//        PRINTF("   %d",horas);
-//        PRINTF(":%d",minutos);
-//        PRINTF(":%d\n",segundos);
-
+         tiempo = concat((char*)minutos, (char*)puntos);
+         UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
+         tiempo = concat((char*)segundos, (char*)fin);
+         UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
 
     }
 }
@@ -266,8 +263,12 @@ void alarm_task()
                 portMAX_DELAY);
         xEventGroupClearBits (g_time_events,
                 (EVENT_SECONDS | EVENT_MINUTES | EVENT_HOURS));
-        //TODO escribir ALARM con la UART
-        PRINTF ("\rAlarm\n");
+       //escribir ALARM con la UART
+       uart_transfer_t xfer;
+       xfer.data = (uint8_t*) ("Alarma");
+       xfer.dataSize = sizeof("Alarma") - 1;
+       txOnGoing = true;
+       UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
         }
 }
 
