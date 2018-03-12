@@ -236,6 +236,7 @@ char* parseToASCII (uint8_t val)
     units += 48;
     decades += 48;
 
+    //TODO send using UART
     char* decades_c = &decades;
     uart_transfer_t xfer2;
     xfer2.data = (uint8_t*) (decades_c);
@@ -249,9 +250,6 @@ char* parseToASCII (uint8_t val)
     xfer.dataSize = sizeof(units_c) - 1;
     txOnGoing = true;
     UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
-
-    //PRINTF ((char*) decades); //TODO not working, use UART
-    //PRINTF ((char*) units); //TODO not working, use UART
 
     return ascii;
 }
@@ -293,12 +291,20 @@ void print_task (void *arg)
                 break;
             }
         }
+        //parseToASCII(segundos);
 
-        char buffer[20];
-        itoa(segundos, buffer, 10);//decimal to string
-
-        parseToASCII(segundos);
-
+        PRINTF ("\033[1A");
+        PRINTF("\033[18D");
+        PRINTF("   ");
+        if(10 > horas)
+        PRINTF("0");
+        PRINTF("%d:",horas);
+        if(10 > minutos)
+        PRINTF("0");
+        PRINTF("%d:",minutos);
+        if(10 > segundos)
+        PRINTF("0");
+        PRINTF("%d\n\r",segundos);
     }
 }
 
