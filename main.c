@@ -43,6 +43,7 @@
 #include "fsl_uart.h"
 #include "stdint.h"
 #include "string.h"
+#include "stdlib.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -51,9 +52,9 @@
 #include "queue.h"
 
 //counters limit
-#define SECONDS_LIMIT 5
-#define MINUTES_LIMIT 5
-#define HOURS_LIMIT 5
+#define SECONDS_LIMIT 60
+#define MINUTES_LIMIT 60
+#define HOURS_LIMIT 24
 //event group index
 #define EVENT_SECONDS (1<<0)
 #define EVENT_MINUTES (1<<1)
@@ -92,7 +93,58 @@ SemaphoreHandle_t semaforo_horas;
 //Queue for messages
 QueueHandle_t xQueue;
 //Alarm
-alarm_type_t g_alarm = {10, 0, 1};
+alarm_type_t g_alarm = {5, 0, 0};
+
+/* UART instance and clock */
+#define DEMO_UART UART0
+#define DEMO_UART_CLKSRC UART0_CLK_SRC
+#define DEMO_UART_CLK_FREQ CLOCK_GetFreq(UART0_CLK_SRC)
+#define ECHO_BUFFER_LENGTH 8
+
+/*******************************************************************************
+ * Prototypes
+ ******************************************************************************/
+
+/* UART user callback */
+void UART_UserCallback(UART_Type *base, uart_handle_t *handle, status_t status, void *userData);
+char* concat(const char *s1, const char *s2);
+/*******************************************************************************
+ * Variables
+ ******************************************************************************/
+uart_handle_t g_uartHandle;
+uint8_t g_txBuffer[ECHO_BUFFER_LENGTH] = {0};
+uint8_t g_rxBuffer[ECHO_BUFFER_LENGTH] = {0};
+volatile bool rxBufferEmpty = true;
+volatile bool txBufferFull = false;
+volatile bool txOnGoing = false;
+volatile bool rxOnGoing = false;
+
+extern void UART0_DriverIRQHandler(void);
+
+/* UART user callback */
+void UART_UserCallback(UART_Type *base, uart_handle_t *handle, status_t status, void *userData)
+{
+    userData = userData;
+
+    if (kStatus_UART_TxIdle == status)
+    {
+        txBufferFull = false;
+        txOnGoing = false;
+    }
+
+    if (kStatus_UART_RxIdle == status)
+    {
+        rxBufferEmpty = false;
+        rxOnGoing = false;
+    }
+}
+
+char* concat(const char *s1, const char *s2){
+     char *result = malloc(strlen(s1)+strlen(s2)+1);
+     strcpy(result, s1);
+     strcat(result, s2);
+     return result;
+}
 
 void seconds_task (void *arg)
 {
@@ -123,6 +175,8 @@ void seconds_task (void *arg)
 void minutes_task (void *arg)
 {
     uint8_t minutes = 0;
+    if (g_alarm.min==minutes)
+       xEventGroupSetBits(g_time_events,EVENT_MINUTES);
     for (;;)
     {
         xSemaphoreTake(semaforo_segundos, portMAX_DELAY);
@@ -145,6 +199,8 @@ void minutes_task (void *arg)
 void hours_task (void *arg)
 {
     uint8_t hours = 0;
+    if (g_alarm.hou==hours)
+               xEventGroupSetBits(g_time_events,EVENT_HOURS);
     for (;;)
     {
         xSemaphoreTake(semaforo_minutos, portMAX_DELAY);
@@ -166,8 +222,8 @@ void hours_task (void *arg)
 char* parseToASCII (uint8_t val)
 {
     char* ascii = "";
-    uint8_t decades = 0;
-    uint8_t units = 0;
+    char decades = 0;
+    char units = 0;
     if (DECADE < val)
     {
         decades = val / DECADE;
@@ -180,14 +236,27 @@ char* parseToASCII (uint8_t val)
     units += 48;
     decades += 48;
 
-    //PRINTF ((char*) decades); //TODO not working, use UART
-    //PRINTF ((char*) units); //TODO not working, use UART
+    //TODO send using UART
+    char* decades_c = &decades;
+    uart_transfer_t xfer2;
+    xfer2.data = (uint8_t*) (decades_c);
+    xfer2.dataSize = sizeof(decades_c) - 1;
+    txOnGoing = true;
+    UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer2);
+
+    char* units_c = &units;
+    uart_transfer_t xfer;
+    xfer.data = (uint8_t*) (units_c);
+    xfer.dataSize = sizeof(units_c) - 1;
+    txOnGoing = true;
+    UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
 
     return ascii;
 }
 
 void print_task (void *arg)
 {
+    uart_transfer_t xfer;
     time_msg_t algoRead;
     uint8_t segundos = 0;
     uint8_t minutos = 0;
@@ -222,15 +291,20 @@ void print_task (void *arg)
                 break;
             }
         }
+        //parseToASCII(segundos);
 
-        //imprimir por la UART
-//        PRINTF("\r");
-//        parseToASCII (segundos);
-//        PRINTF(":");
-//        parseToASCII (minutos);
-//        PRINTF (":");
-//        parseToASCII (horas);
-//        PRINTF("\n");
+        PRINTF ("\033[1A");
+        PRINTF("\033[18D");
+        PRINTF("   ");
+        if(10 > horas)
+        PRINTF("0");
+        PRINTF("%d:",horas);
+        if(10 > minutos)
+        PRINTF("0");
+        PRINTF("%d:",minutos);
+        if(10 > segundos)
+        PRINTF("0");
+        PRINTF("%d\n\r",segundos);
     }
 }
 
@@ -244,8 +318,12 @@ void alarm_task()
                 portMAX_DELAY);
         xEventGroupClearBits (g_time_events,
                 (EVENT_SECONDS | EVENT_MINUTES | EVENT_HOURS));
-        //TODO escribir ALARM con la UART
-        PRINTF ("\rAlarm\n");
+       //escribir ALARM con la UART
+       uart_transfer_t xfer;
+       xfer.data = (uint8_t*) ("Alarma");
+       xfer.dataSize = sizeof("Alarma") - 1;
+       txOnGoing = true;
+       UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
         }
 }
 
@@ -259,9 +337,6 @@ int main (void)
     /* Init FSL debug console. */
     BOARD_InitDebugConsole ();
 
-    //UART
-    PRINTF("\rInicio\n\r");
-
     //Queue
     /* Create a queue big enough to hold 10 chars. */
     xQueue = xQueueCreate(QUEUE_LENGTH, QUEUE_ITEM_SIZE);
@@ -270,6 +345,16 @@ int main (void)
     xQueueSend(xQueue, &algo, portMAX_DELAY);
     time_msg_t algoRead;
     xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
+
+    //UART
+    uart_config_t config;
+    UART_GetDefaultConfig(&config);
+    config.baudRate_Bps = BOARD_DEBUG_UART_BAUDRATE;
+    config.enableTx = true;
+    config.enableRx = true;
+
+    UART_Init(DEMO_UART, &config, DEMO_UART_CLK_FREQ);
+    UART_TransferCreateHandle(DEMO_UART, &g_uartHandle, UART_UserCallback, NULL);
 
     //Semaphorea
     semaforo_segundos = xSemaphoreCreateBinary();
