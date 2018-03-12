@@ -41,12 +41,58 @@
 #include "fsl_port.h"
 #include "fsl_gpio.h"
 #include "fsl_uart.h"
+#include "stdint.h"
+#include "string.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 #include "semphr.h"
 #include "event_groups.h"
 #include "queue.h"
+
+//counters limit
+#define SECONDS_LIMIT 60
+#define MINUTES_LIMIT 60
+#define HOURS_LIMIT 24
+//event group index
+#define EVENT_SECONDS (1<<0)
+#define EVENT_MINUTES (1<<1)
+#define EVENT_HOURS (1<<2)
+//value to obteain decades
+#define DECADE 10
+
+//Enum to identify message value
+typedef enum
+{
+    SECONDS, MINUTES, HOURS
+} time_types_t;
+//struct for messages
+typedef struct
+{
+    time_types_t time_type;
+    uint8_t value;
+} time_msg_t;
+//alarm struct
+typedef struct
+{
+    uint8_t sec;
+    uint8_t min;
+    uint8_t hou;
+}alarm_type_t;
+
+#define QUEUE_LENGTH 3
+#define QUEUE_ITEM_SIZE sizeof( time_msg_t )
+
+//Event gorup
+EventGroupHandle_t g_time_events;
+//Semaphores
+SemaphoreHandle_t semaforo_segundos;
+SemaphoreHandle_t semaforo_minutos;
+SemaphoreHandle_t semaforo_horas;
+//Queue for messages
+QueueHandle_t xQueue;
+//Alarm
+alarm_type_t g_alarm = {10, 0, 0};
 
 /* UART instance and clock */
 #define DEMO_UART UART0
@@ -72,55 +118,32 @@ volatile bool txBufferFull = false;
 volatile bool txOnGoing = false;
 volatile bool rxOnGoing = false;
 
-/* Counters limit */
-#define SECONDS_LIMIT 60
-#define MINUTES_LIMIT 60
-#define HOURS_LIMIT 24
-/* Event group index */
-#define EVENT_SECONDS (1<<0)
-#define EVENT_MINUTES (1<<1)
-#define EVENT_HOURS (1<<2)
-/* Value to obtain decades */
-#define DECADE 10
+extern void UART0_DriverIRQHandler(void);
 
-/* Enum to identify message value */
-typedef enum
+/* UART user callback */
+void UART_UserCallback(UART_Type *base, uart_handle_t *handle, status_t status, void *userData)
 {
-    SECONDS, MINUTES, HOURS
-} time_types_t;
+    userData = userData;
 
-/* Struct for messages */
-typedef struct
-{
-    time_types_t time_type;
-    uint8_t value;
-} time_msg_t;
+    if (kStatus_UART_TxIdle == status)
+    {
+        txBufferFull = false;
+        txOnGoing = false;
+    }
 
+    if (kStatus_UART_RxIdle == status)
+    {
+        rxBufferEmpty = false;
+        rxOnGoing = false;
+    }
+}
 
-/* Alarm struct */
-typedef struct
-{
-    uint8_t sec;
-    uint8_t min;
-    uint8_t hou;
-}alarm_type_t;
-
-#define QUEUE_LENGTH 3
-#define QUEUE_ITEM_SIZE sizeof( time_msg_t )
-
-/* Event gorup */
-EventGroupHandle_t g_time_events;
-
-/* Semaphores */
-SemaphoreHandle_t semaforo_segundos;
-SemaphoreHandle_t semaforo_minutos;
-SemaphoreHandle_t semaforo_horas;
-
-/* Queue for messages */
-QueueHandle_t xQueue;
-
-/* Alarm */
-alarm_type_t g_alarm = {10, 0, 1};
+char* concat(const char *s1, const char *s2){
+     char *result = malloc(strlen(s1)+strlen(s2)+1);
+     strcpy(result, s1);
+     strcat(result, s2);
+     return result;
+}
 
 void seconds_task (void *arg)
 {
@@ -151,6 +174,8 @@ void seconds_task (void *arg)
 void minutes_task (void *arg)
 {
     uint8_t minutes = 0;
+    if (g_alarm.min==minutes)
+       xEventGroupSetBits(g_time_events,EVENT_MINUTES);
     for (;;)
     {
         xSemaphoreTake(semaforo_segundos, portMAX_DELAY);
@@ -173,6 +198,8 @@ void minutes_task (void *arg)
 void hours_task (void *arg)
 {
     uint8_t hours = 0;
+    if (g_alarm.hou==hours)
+               xEventGroupSetBits(g_time_events,EVENT_HOURS);
     for (;;)
     {
         xSemaphoreTake(semaforo_minutos, portMAX_DELAY);
@@ -191,10 +218,9 @@ void hours_task (void *arg)
     }
 }
 
-
 void print_task (void *arg)
 {
-	uart_transfer_t xfer;
+    uart_transfer_t xfer;
     time_msg_t algoRead;
     uint8_t segundos = 0;
     uint8_t minutos = 0;
@@ -213,20 +239,14 @@ void print_task (void *arg)
             }
             case MINUTES:
             {
+                segundos = 0;
                 minutos = algoRead.value;
-                if (0 == minutos)
-                {
-                    xQueueGenericReceive (xQueue, &algoRead, 10, pdFALSE);
-                    if (HOURS == algoRead.time_type)
-                    {
-                        horas = algoRead.value;
-                    }
-                }
                 break;
             }
             case HOURS:
-                break;
                 {
+                    segundos = 0;
+                    minutos = 0;
                     horas = algoRead.value;
                     break;
                 }
@@ -236,23 +256,27 @@ void print_task (void *arg)
             }
         }
 
+        //imprimir por la UART
         char* horas_minutos = concat((char*)horas, (char*)minutos);
         char* tiempo = concat(horas_minutos, (char*)segundos);
 
         /* Send g_tipString out. */
-         xfer.data = (uint8_t*)tiempo;
-         xfer.dataSize = sizeof(tiempo) - 1;
-         txOnGoing = true;
-         UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
-
+        xfer.data = (uint8_t*)tiempo;
+        xfer.dataSize = sizeof(tiempo) - 1;
+        txOnGoing = true;
+        UART_TransferSendNonBlocking(DEMO_UART, &g_uartHandle, &xfer);
 //        PRINTF ("\033[1A");
 //        PRINTF("\033[18D");
-//        PRINTF("\033[2J");
-//        PRINTF("   %d",horas);
-//        PRINTF(":%d",minutos);
-//        PRINTF(":%d\n",segundos);
-
-
+//        PRINTF("   ");
+//        if(10 > horas)
+//            PRINTF("0");
+//        PRINTF("%d:",horas);
+//        if(10 > minutos)
+//            PRINTF("0");
+//        PRINTF("%d:",minutos);
+//        if(10 > segundos)
+//            PRINTF("0");
+//        PRINTF("%d\n\r",segundos);
     }
 }
 
@@ -267,7 +291,7 @@ void alarm_task()
         xEventGroupClearBits (g_time_events,
                 (EVENT_SECONDS | EVENT_MINUTES | EVENT_HOURS));
         //TODO escribir ALARM con la UART
-        PRINTF ("\rAlarm\n");
+        PRINTF ("\rAlarm");
         }
 }
 
@@ -290,25 +314,7 @@ int main (void)
     time_msg_t algoRead;
     xQueuePeek(xQueue, &algoRead, portMAX_DELAY);
 
-    //Semaphorea
-    semaforo_segundos = xSemaphoreCreateBinary();
-    semaforo_minutos = xSemaphoreCreateBinary();
-    semaforo_horas = xSemaphoreCreateBinary();
-
-    g_time_events = xEventGroupCreate();
-
-    //Tasks
-    xTaskCreate (seconds_task, "Segundos", 300, NULL,
-    configMAX_PRIORITIES - 1, NULL);
-    xTaskCreate (minutes_task, "Minutes", 300, NULL,
-    configMAX_PRIORITIES - 1, NULL);
-    xTaskCreate (hours_task, "Hours", 300, NULL,
-    configMAX_PRIORITIES - 1, NULL);
-    xTaskCreate (print_task, "Mensaje", 300, NULL,
-    configMAX_PRIORITIES - 1, NULL);
-    xTaskCreate (alarm_task, "Alarma", 300, NULL,
-    configMAX_PRIORITIES - 1, NULL);
-
+    //UART
     uart_config_t config;
     UART_GetDefaultConfig(&config);
     config.baudRate_Bps = BOARD_DEBUG_UART_BAUDRATE;
@@ -318,6 +324,25 @@ int main (void)
     UART_Init(DEMO_UART, &config, DEMO_UART_CLK_FREQ);
     UART_TransferCreateHandle(DEMO_UART, &g_uartHandle, UART_UserCallback, NULL);
 
+    //Semaphorea
+    semaforo_segundos = xSemaphoreCreateBinary();
+    semaforo_minutos = xSemaphoreCreateBinary();
+    semaforo_horas = xSemaphoreCreateBinary();
+
+    g_time_events = xEventGroupCreate();
+
+    //Tasks
+    xTaskCreate (seconds_task, "Segundos", 300, NULL,
+    configMAX_PRIORITIES - 2, NULL);
+    xTaskCreate (minutes_task, "Minutes", 300, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (hours_task, "Hours", 300, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (print_task, "Mensaje", 300, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate (alarm_task, "Alarma", 300, NULL,
+    configMAX_PRIORITIES - 1, NULL);
+
     vTaskStartScheduler ();
 
     while (1)
@@ -325,32 +350,4 @@ int main (void)
 
     }
     return 0;
-}
-
-
-extern void UART0_DriverIRQHandler(void);
-
-/* UART user callback */
-void UART_UserCallback(UART_Type *base, uart_handle_t *handle, status_t status, void *userData)
-{
-    userData = userData;
-
-    if (kStatus_UART_TxIdle == status)
-    {
-        txBufferFull = false;
-        txOnGoing = false;
-    }
-
-    if (kStatus_UART_RxIdle == status)
-    {
-        rxBufferEmpty = false;
-        rxOnGoing = false;
-    }
-}
-
-char* concat(const char *s1, const char *s2){
-	 char *result = malloc(strlen(s1)+strlen(s2)+1);
-	 strcpy(result, s1);
-	 strcat(result, s2);
-	 return result;
 }
